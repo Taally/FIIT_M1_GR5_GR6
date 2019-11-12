@@ -30,7 +30,7 @@ typedef float elem;
 //typedef double elem;
 
 const int g_nNumberOfThreads = 8;
-const int N = 32; //2880; // matrix size 
+const int N = 2880; //2880; // matrix size 
 const elem eps = 1e-1;
 vector<elem> A; // LowerTriangle matrix A
 vector<elem> B; // Simmetric matrix B
@@ -257,17 +257,17 @@ vector<elem> CalcBlockC(int cI, int cJ,
 	const int BLOCK_CNT = N / M;
 	vector<vector<elem>> blocks(cI + 1);
 	
-	for (int k = 0; (k <= cJ)&&(k <= cI); ++k)
-	{
-		int indA = getLowerElemNumber(cI, k, BLOCK_CNT);
-		int indB = getSimElemNumber(k, cJ);
-		blocks[k] = MultBlocks(aBlocks[indA], bBlocks[indB], M);
-	}
-	for (int k = cJ + 1; k <= cI; ++k)
+	for (int k = cI; k > cJ; --k)
 	{
 		int indA = getLowerElemNumber(cI, k, BLOCK_CNT);
 		int indB = getSimElemNumber(k, cJ);
 		blocks[k] = MultBlocksTransposedB(aBlocks[indA], bBlocks[indB], M);
+	}
+	for (int k = cJ; k >= 0; --k)
+	{
+		int indA = getLowerElemNumber(cI, k, BLOCK_CNT);
+		int indB = getSimElemNumber(k, cJ);
+		blocks[k] = MultBlocks(aBlocks[indA], bBlocks[indB], M);
 	}
 	return SumMatrices(blocks);
 }
@@ -351,22 +351,62 @@ vector<elem> calculateC(int M)
 	vector<vector<elem>> bBlocks = CreateBBlocks(M);
 
 	vector<vector<elem>> blocksC(TOTAL_BLOCK_CNT);
-	
+
 	clock_t begin = clock();
 
-#pragma omp parallel for // parallel 1
-	// 6-тимерный цикл
-	for (int blockI = 0; blockI < BLOCK_CNT; ++blockI)	{
-		for (int blockJ = 0; blockJ < BLOCK_CNT; ++blockJ)	{
-			blocksC[blockJ*BLOCK_CNT + blockI] = CalcBlockC(blockI, blockJ, aBlocks, bBlocks, M);
+	for (int blockI = 0; blockI < BLOCK_CNT; ++blockI) {
+		#pragma omp parallel for // parallel 1
+		for (int blockJ = 0; blockJ < BLOCK_CNT; ++blockJ) {
+	
+			vector<elem> curBlock(M*M);
+			int blockK;
+			for (blockK = blockI; blockK > blockJ; --blockK)
+			{
+				int indA = getLowerElemNumber(blockI, blockK, BLOCK_CNT);
+				int indB = getSimElemNumber(blockK, blockJ);
+
+				for (int i = 0; i < M; ++i)
+				{
+					//#pragma omp parallel for // parallel 2
+					for (int j = 0; j < M; ++j)
+					{
+						elem res = 0;
+						for (int k = 0; k < M; ++k)
+						{
+							res += aBlocks[indA][i + k * M] * bBlocks[indB][j + k * M];
+						}
+						curBlock[i + j * M] += res;
+					}
+				}
+			}
+			for (; blockK  >= 0; --blockK)
+			{
+				int indA = getLowerElemNumber(blockI, blockK, BLOCK_CNT);
+				int indB = getSimElemNumber(blockK, blockJ);
+
+				for (int i = 0; i < M; ++i)
+				{
+					//#pragma omp parallel for // parallel 2
+					for (int j = 0; j < M; ++j)
+					{
+						elem res = 0;
+						for (int k = 0; k < M; ++k)
+						{
+							res += aBlocks[indA][i + k * M] * bBlocks[indB][k + j * M];
+						}
+						curBlock[i + j * M] += res;
+					}
+				}
+			}
+			blocksC[blockJ*BLOCK_CNT + blockI] = curBlock;
 		}
 	}
+
 	clock_t end = clock();
 	double elapsed_secs = double(end - begin) / 1000;
 
 	vector<elem> C = ConstructC(blocksC, M);
 	bool correct = checkC(C);
-	//bool correct = checkSavedC(C);
 	cout << (correct ? "Yes" : "No") << endl;
 	cout << elapsed_secs << endl << endl;
 	return C;
@@ -375,10 +415,14 @@ vector<elem> calculateC(int M)
 void measureTime()
 {
 	//vector<int> blocksizes = { 1, 6, 10, 15, 20, 24, 30, 36, 40, 60, 72, 80, 96, 120, 144, 160, 180, 240, 360, 480, 720 };
-	vector<int> blocksizes = { 1, 2, 4, 8, 16, 32 };
+	vector<int> blocksizes = { 80, 96, 120, 144, 160, 180 };
 	generateMatrices();
-	multiplyAB();
 
+	clock_t begin = clock();
+	multiplyAB();
+	clock_t end = clock();
+	double elapsed_secs = double(end - begin) / 1000;
+	cout << "Simple multiplication took " << elapsed_secs << endl;
 	
 	cout << "Start calc blocks" << endl;
 	int k = blocksizes.size() - 1;
