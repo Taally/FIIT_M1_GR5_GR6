@@ -30,7 +30,7 @@ typedef float elem;
 //typedef double elem;
 
 const int g_nNumberOfThreads = 8;
-const int N = 32; //2880; // matrix size 
+const int N = 2880; //2880; // matrix size 
 const elem eps = 1e-1;
 vector<elem> A; // LowerTriangle matrix A
 vector<elem> B; // Simmetric matrix B
@@ -110,58 +110,7 @@ elem elemInSimBlock(int i, int j, int bI, int bJ, int M)
 	idx = getSimElemNumber(iMatr, jMatr);
 	return B[idx];
 }
-/*
-// ? Индекс элемента (i,j) блока в одномерном массиве. 
-// Если элемент не входит в массив (т.к. равен 0), индекс = -1. 
-int getBlockElemNumber(int i, int j, int blocknum, bool isLower, int M)
-{
-	int BLOCK_CNT = N / M;
-	int iMatr = i + (blocknum % BLOCK_CNT) * M;
-	int jMatr = j + (blocknum / BLOCK_CNT) * M;
 
-	int k;
-	if (isLower)
-	{
-		if (isZeroLower(iMatr, jMatr))
-			k = -1;
-		else
-			k = getLowerElemNumber(iMatr, jMatr, N);
-	}
-	else
-		k = getSimElemNumber(iMatr, jMatr);
-	return k;
-}
-
-// ? Выделить блок в отдельный массив
-// если блок нулевой, вернуть пустой массив
-vector<elem> getBlock(int blocknum, bool isLower, int M)
-{
-	if (isLower)
-	{
-		int idx = getBlockElemNumber(0, 0, blocknum, true, M);
-		if (idx == -1)
-			return vector<elem>();
-	}
-
-	vector<elem> block(M*M); // (n*n + n) / 2;
-	for (int j = 0; j < M; ++j)
-		for (int i = 0; i < M; ++i)
-		{
-			int k = i + j * M;		
-			int idx = getBlockElemNumber(i, j, blocknum, isLower, M);
-			if (idx == -1)
-				block[k] = 0;
-			else
-			{
-				if (isLower)
-					block[k] = A[idx];
-				else
-					block[k] = B[idx];
-			}
-		}
-	return block;
-}
-*/
 vector<elem> SumMatrices(vector<vector<elem>> & matrices)
 {
 	int length = matrices[0].size();
@@ -232,10 +181,10 @@ vector<elem> MultBlocks(vector<elem> & blockA, vector<elem> & blockB, int M)
 {
 	vector<elem> resMatr(M*M);
 //#pragma omp parallel for // parallel 2
-	for (int t = 0; t < M*M; ++t)
+	for (int i = 0; i < M; ++i)
+	{
+		for (int j = 0; j < M; ++j)
 		{
-			int i = t / M;
-			int j = t % M;
 			elem res = 0;
 			for (int k = 0; k < M; ++k)
 			{
@@ -245,6 +194,7 @@ vector<elem> MultBlocks(vector<elem> & blockA, vector<elem> & blockB, int M)
 			}
 			resMatr[i + j * M] = res;
 		}
+	}
 	return resMatr;
 }
 
@@ -252,18 +202,19 @@ vector<elem> MultBlocksTransposedB(vector<elem> & blockA, vector<elem> & blockB,
 {
 	vector<elem> resMatr(M*M);
 //#pragma omp parallel for // parallel 2
-	for (int t = 0; t < M*M; ++t)
+	for (int i = 0; i < M; ++i)
 	{
-		int i = t / M;
-		int j = t % M;
-		elem res = 0;
-		for (int k = 0; k < M; ++k)
+		for (int j = 0; j < M; ++j)
 		{
-			int indA = i + k * M;
-			int indB = j + k * M;
-			res += blockA[indA] * blockB[indB];
+			elem res = 0;
+			for (int k = 0; k < M; ++k)
+			{
+				int indA = i + k * M;
+				int indB = j + k * M;
+				res += blockA[indA] * blockB[indB];
+			}
+			resMatr[i + j * M] = res;
 		}
-		resMatr[i + j * M] = res;
 	}
 	return resMatr;
 }
@@ -384,14 +335,13 @@ vector<elem> calculateC(int M)
 	
 	clock_t begin = clock();
 
-//#pragma omp parallel for // parallel 1
-	for (int k = 0; k < TOTAL_BLOCK_CNT; ++k)
-	{
-		int i = k % BLOCK_CNT;
-		int j = k / BLOCK_CNT;
-		blocksC[k] = CalcBlockC(i, j, aBlocks, bBlocks, M);
+#pragma omp parallel for // parallel 1
+	// 6-тимерный цикл
+	for (int i = 0; i < BLOCK_CNT; ++i)	{
+		for (int j = 0; j < BLOCK_CNT; ++j)	{
+			blocksC[j*BLOCK_CNT + i] = CalcBlockC(i, j, aBlocks, bBlocks, M);
+		}
 	}
-
 	clock_t end = clock();
 	double elapsed_secs = double(end - begin) / 1000;
 
@@ -404,16 +354,14 @@ vector<elem> calculateC(int M)
 
 void measureTime()
 {
-//	vector<int> blocksizes = { 1, 6, 10, 15, 20, 24, 30, 36, 40, 60, 72, 80, 96, 120, 144, 160, 180, 240, 360, 480, 720 };
-	vector<int> blocksizes = { 1, 2, 4, 8, 16 };
+	vector<int> blocksizes = { 1, 6, 10, 15, 20, 24, 30, 36, 40, 60, 72, 80, 96, 120, 144, 160, 180, 240, 360, 480, 720 };
+	//vector<int> blocksizes = { 1, 2, 4, 8, 16 };
 	A = fillTriang();
 	B = fillTriang();
+	// создаем квадратные(!) матрицы, с нулями. 
+	// их перемножить, для сравнения потом 
+	// создать блоки
 
-	clock_t start = clock();
-	realC = multiplyAB();
-	double secs = double(clock() - start) / 1000;
-	cout << secs << endl;
-	
 	cout << "Start calc blocks" << endl;
 	int k = blocksizes.size() - 1;
 	while (k >= 0) {
