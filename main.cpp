@@ -30,7 +30,7 @@ typedef float elem;
 //typedef double elem;
 
 const int g_nNumberOfThreads = 8;
-const int N = 2880; //2880; // matrix size 
+const int N = 32; //2880; // matrix size 
 const elem eps = 1e-1;
 vector<elem> A; // LowerTriangle matrix A
 vector<elem> B; // Simmetric matrix B
@@ -39,7 +39,30 @@ vector<elem> realC;
 elem random()
 {
 	elem max = 10;
+	return static_cast<elem>(rand() / 1000);
 	return static_cast<elem>(rand()) / (static_cast<elem>(RAND_MAX / max));
+}
+
+void generateMatrices()
+{
+	A.resize(N*N);
+	B.resize(N*N);
+
+	for (int j = 0; j < N; ++j)
+		for (int i = 0; i < N; ++i)
+		{
+			int index = i + j * N;
+			if (j <= i)
+			{
+				A[index] = random();
+				B[index] = random();
+			}
+			else 
+			{
+				A[index] = 0;
+				B[index] = B[i * N + j];
+			}
+		}
 }
 
 vector<elem> fillTriang()
@@ -131,7 +154,10 @@ vector<elem> getBlockForLower(int bI, int bJ, int M)
 	for (int j = 0; j < M; ++j)
 		for (int i = 0; i < M; ++i)
 		{
-			block[i + j * M] = elemInLowerBlock(i, j, bI, bJ, M);
+			int elI = bI * M + i;
+			int elJ = bJ * M + j;
+			block[i + j * M] = A[elI + elJ * N];
+			//block[i + j * M] = elemInLowerBlock(i, j, bI, bJ, M);
 		}
 	return block;
 }
@@ -144,7 +170,7 @@ vector<vector<elem>> CreateABlocks(int M)
 	vector<vector<elem>> aBlocks(size);
 	for (int i = 0; i < BLOCK_CNT; ++i)
 		for (int j = 0; j <= i; ++j)
-		{
+		{ 
 			int k = getLowerElemNumber(i, j, BLOCK_CNT);
 			aBlocks[k] = getBlockForLower(i, j, M);
 		}
@@ -157,7 +183,10 @@ vector<elem> getBlockForSim(int bI, int bJ, int M)
 	for (int j = 0; j < M; ++j)
 		for (int i = 0; i < M; ++i)
 		{
-			block[i + j * M] = elemInSimBlock(i, j, bI, bJ, M);
+			int elI = bI * M + i;
+			int elJ = bJ * M + j;
+			block[i + j * M] = B[elI + elJ * N];
+			//block[i + j * M] = elemInSimBlock(i, j, bI, bJ, M);
  		}
 	return block;
 }
@@ -264,29 +293,18 @@ vector<elem> ConstructC(vector<vector<elem>> & blocks, int M)
 
 // Simple multiplication
 vector<elem> multiplyAB() {
-	vector<elem> C(N*N);
+	realC.resize(N*N);
 
-# pragma omp parallel for
-	for (int t = 0; t < N*N; ++t)
-	{
-		int i = t / N;
-		int j = t % N;
+//# pragma omp parallel for
+	for (int i = 0; i < N; ++i)
+		for (int j = 0; j < N; ++j)
 		{
 			elem res = 0;
 			for (int k = 0; k < N; ++k) 
-			{
-				int idxA = getLowerElemNumber(i, k, N);
-				int idxB = getSimElemNumber(k, j);
-				elem elemA = 0;
-				elem elemB = B[idxB];
-				if (idxA != -1)
-					elemA = A[idxA];
-				res += elemA * elemB;
-			}
-			C[j * N + i] = res;
+				res += A[i + k * N] * B[k + j * N];
+			realC[j * N + i] = res;
 		}
-	}
-	return C;
+	return realC;
 }
 
 void saveRes(vector<elem> & C)
@@ -309,7 +327,7 @@ vector<elem> loadRes()
 	return C;
 }
 
-bool checkSavedC(vector<elem> & C)
+bool checkC(vector<elem> & C)
 {
 	if (C.size() != realC.size())
 		return false;
@@ -331,37 +349,37 @@ vector<elem> calculateC(int M)
 
 	vector<vector<elem>> aBlocks = CreateABlocks(M);
 	vector<vector<elem>> bBlocks = CreateBBlocks(M);
+
 	vector<vector<elem>> blocksC(TOTAL_BLOCK_CNT);
 	
 	clock_t begin = clock();
 
 #pragma omp parallel for // parallel 1
 	// 6-тимерный цикл
-	for (int i = 0; i < BLOCK_CNT; ++i)	{
-		for (int j = 0; j < BLOCK_CNT; ++j)	{
-			blocksC[j*BLOCK_CNT + i] = CalcBlockC(i, j, aBlocks, bBlocks, M);
+	for (int blockI = 0; blockI < BLOCK_CNT; ++blockI)	{
+		for (int blockJ = 0; blockJ < BLOCK_CNT; ++blockJ)	{
+			blocksC[blockJ*BLOCK_CNT + blockI] = CalcBlockC(blockI, blockJ, aBlocks, bBlocks, M);
 		}
 	}
 	clock_t end = clock();
 	double elapsed_secs = double(end - begin) / 1000;
 
 	vector<elem> C = ConstructC(blocksC, M);
+	bool correct = checkC(C);
 	//bool correct = checkSavedC(C);
-	//cout << (correct ? "Yes" : "No") << endl;
+	cout << (correct ? "Yes" : "No") << endl;
 	cout << elapsed_secs << endl << endl;
 	return C;
 }
 
 void measureTime()
 {
-	vector<int> blocksizes = { 1, 6, 10, 15, 20, 24, 30, 36, 40, 60, 72, 80, 96, 120, 144, 160, 180, 240, 360, 480, 720 };
-	//vector<int> blocksizes = { 1, 2, 4, 8, 16 };
-	A = fillTriang();
-	B = fillTriang();
-	// создаем квадратные(!) матрицы, с нулями. 
-	// их перемножить, для сравнения потом 
-	// создать блоки
+	//vector<int> blocksizes = { 1, 6, 10, 15, 20, 24, 30, 36, 40, 60, 72, 80, 96, 120, 144, 160, 180, 240, 360, 480, 720 };
+	vector<int> blocksizes = { 1, 2, 4, 8, 16, 32 };
+	generateMatrices();
+	multiplyAB();
 
+	
 	cout << "Start calc blocks" << endl;
 	int k = blocksizes.size() - 1;
 	while (k >= 0) {
@@ -373,6 +391,26 @@ void measureTime()
 int main()
 {
 	measureTime();
+	/*int M = 2;
+	generateMatrices();
+	for (int i = 0; i < N; ++i)
+	{
+		for (int j = 0; j < N; ++j)
+			cout << A[i + j * N] << " ";
+		cout << endl;
+	}
+
+	for (int i = 0; i < N; ++i)
+	{
+		for (int j = 0; j < N; ++j)
+			cout << B[i + j * N] << " ";
+		cout << endl;
+	}
+	vector<vector<elem>> aBlocks = CreateABlocks(M);
+	vector<vector<elem>> bBlocks = CreateBBlocks(M);*/
+
+
+
 	int wait;
 	cin >> wait;
 }
