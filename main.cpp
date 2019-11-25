@@ -166,7 +166,7 @@ vector<vector<elem>> CreateABlocks(int M)
 {
 	int BLOCK_CNT = N / M; // number of blocks on one side
 	int size = (BLOCK_CNT * BLOCK_CNT + BLOCK_CNT) / 2;
-
+	
 	vector<vector<elem>> aBlocks(size);
 	for (int i = 0; i < BLOCK_CNT; ++i)
 		for (int j = 0; j <= i; ++j)
@@ -353,21 +353,25 @@ vector<elem> calculateC(int M)
 	vector<vector<elem>> blocksC(TOTAL_BLOCK_CNT);
 
 	clock_t begin = clock();
-
+	//#pragma omp parallel for // parallel 1
 	for (int blockI = 0; blockI < BLOCK_CNT; ++blockI) {
-		#pragma omp parallel for // parallel 1
 		for (int blockJ = 0; blockJ < BLOCK_CNT; ++blockJ) {
 	
 			vector<elem> curBlock(M*M);
+			//vector<vector<elem>> blocks;
+			//blocks.resize(blockI);
+
 			int blockK;
 			for (blockK = blockI; blockK > blockJ; --blockK)
 			{
 				int indA = getLowerElemNumber(blockI, blockK, BLOCK_CNT);
 				int indB = getSimElemNumber(blockK, blockJ);
 
+				//blocks[blockK] = MultBlocksTransposedB(aBlocks[indA], bBlocks[indB], M);
+
+				#pragma omp parallel for // parallel 2
 				for (int i = 0; i < M; ++i)
 				{
-					//#pragma omp parallel for // parallel 2
 					for (int j = 0; j < M; ++j)
 					{
 						elem res = 0;
@@ -384,9 +388,10 @@ vector<elem> calculateC(int M)
 				int indA = getLowerElemNumber(blockI, blockK, BLOCK_CNT);
 				int indB = getSimElemNumber(blockK, blockJ);
 
+				//blocks[blockK] = MultBlocks(aBlocks[indA], bBlocks[indB], M);
+				#pragma omp parallel for // parallel 2
 				for (int i = 0; i < M; ++i)
 				{
-					//#pragma omp parallel for // parallel 2
 					for (int j = 0; j < M; ++j)
 					{
 						elem res = 0;
@@ -398,6 +403,8 @@ vector<elem> calculateC(int M)
 					}
 				}
 			}
+
+			//blocksC[blockJ*BLOCK_CNT + blockI] == SumMatrices(blocks);
 			blocksC[blockJ*BLOCK_CNT + blockI] = curBlock;
 		}
 	}
@@ -414,8 +421,8 @@ vector<elem> calculateC(int M)
 
 void measureTime()
 {
-	//vector<int> blocksizes = { 1, 6, 10, 15, 20, 24, 30, 36, 40, 60, 72, 80, 96, 120, 144, 160, 180, 240, 360, 480, 720 };
-	vector<int> blocksizes = { 80, 96, 120, 144, 160, 180 };
+	vector<int> blocksizes = { 1, 6, 10, 15, 20, 24, 30, 36, 40, 60, 72, 80, 96, 120, 144, 160, 180, 240, 360, 480, 720 };
+	//vector<int> blocksizes = { 80, 96, 120, 144, 160, 180 };
 	generateMatrices();
 
 	clock_t begin = clock();
@@ -435,26 +442,6 @@ void measureTime()
 int main()
 {
 	measureTime();
-	/*int M = 2;
-	generateMatrices();
-	for (int i = 0; i < N; ++i)
-	{
-		for (int j = 0; j < N; ++j)
-			cout << A[i + j * N] << " ";
-		cout << endl;
-	}
-
-	for (int i = 0; i < N; ++i)
-	{
-		for (int j = 0; j < N; ++j)
-			cout << B[i + j * N] << " ";
-		cout << endl;
-	}
-	vector<vector<elem>> aBlocks = CreateABlocks(M);
-	vector<vector<elem>> bBlocks = CreateBBlocks(M);*/
-
-
-
 	int wait;
 	cin >> wait;
 }
